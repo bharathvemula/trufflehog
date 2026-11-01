@@ -108,3 +108,44 @@ func TestSqlServer_FromDataWithIgnorePattern(t *testing.T) {
 		t.Errorf("expected no results, but got %d", len(got))
 	}
 }
+
+func TestSQLServer_PasswordSpecialChars5501(t *testing.T) {
+	s := Scanner{}
+	tests := []struct {
+		name     string
+		password string
+		wantRaw  string // empty means: expect no result
+	}{
+		{name: "dollar mid-string", password: `Ab$cdFakeOnly123`, wantRaw: `Ab$cdFakeOnly123`},
+		{name: "backtick mid-string", password: "Ab`cdFakeOnly123", wantRaw: "Ab`cdFakeOnly123"},
+		{name: "apostrophe mid-string", password: `Ab'cdFakeOnly123`, wantRaw: `Ab'cdFakeOnly123`},
+		{name: "leading dollar", password: `$cdFakeOnly123`, wantRaw: `$cdFakeOnly123`},
+		{name: "leading backtick", password: "`cdFakeOnly123", wantRaw: "`cdFakeOnly123"},
+		{name: "placeholder paren form skipped", password: `$(DbPassword)`, wantRaw: ``},
+		{name: "placeholder brace-dollar form skipped", password: `${PASSWORD}`, wantRaw: ``},
+		{name: "placeholder bare env var skipped", password: `$PASSWORD`, wantRaw: ``},
+		{name: "placeholder format token skipped", password: `{Password}`, wantRaw: ``},
+		{name: "password merely containing braces still reported", password: `Pass{0}word`, wantRaw: `Pass{0}word`},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			input := `Server=TEST-SQL;Database=Demo;User Id=demo_user;Password=` + test.password + `;TrustServerCertificate=True`
+			results, err := s.FromData(context.Background(), false, []byte(input))
+			if err != nil {
+				t.Fatalf("FromData() error = %v", err)
+			}
+			if test.wantRaw == "" {
+				if len(results) != 0 {
+					t.Fatalf("expected no results for placeholder password %q, got %d (Raw=%q)", test.password, len(results), string(results[0].Raw))
+				}
+				return
+			}
+			if len(results) != 1 {
+				t.Fatalf("expected 1 result for password %q, got %d", test.password, len(results))
+			}
+			if got := string(results[0].Raw); got != test.wantRaw {
+				t.Errorf("Raw = %q, want %q", got, test.wantRaw)
+			}
+		})
+	}
+}
